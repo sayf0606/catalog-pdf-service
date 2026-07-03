@@ -4,7 +4,7 @@ Catalog PDF Filter Script for n8n
 Usage: python3 catalog_filter.py <pdf_path> <product_numbers> <output_path>
   product_numbers: comma-separated list of NO. values, e.g. "1,5,14,23"
 """
- 
+
 import sys
 import os
 import io
@@ -20,9 +20,9 @@ from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm, cm
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
- 
+
 SCALE = 150 / 72  # 150 DPI / 72 pts per inch
- 
+
 def extract_products(pdf_path):
     """Extract all product data with row bounding boxes"""
     products = []
@@ -92,8 +92,8 @@ def extract_products(pdf_path):
                 })
     
     return products
- 
- 
+
+
 def get_row_image(page_images, page_num, row_top, row_bottom, table_left, table_right):
     """Crop row region from rendered page image (dict keyed by page_num), return PIL Image"""
     if page_num not in page_images:
@@ -116,8 +116,8 @@ def get_row_image(page_images, page_num, row_top, row_bottom, table_left, table_
         return None
     
     return page_img.crop((left_px, top_px, right_px, bottom_px))
- 
- 
+
+
 def create_filtered_pdf(pdf_path, selected_nos, output_path):
     """Main function: filter products by NO, create output PDF"""
     
@@ -130,27 +130,34 @@ def create_filtered_pdf(pdf_path, selected_nos, output_path):
         if part and part not in seen_req:
             seen_req.add(part)
             requested_order.append(part)
- 
+
     # Extract all products
     print(f"Parsing catalog: {pdf_path}")
     products = extract_products(pdf_path)
     print(f"Found {len(products)} products total")
- 
+
     # Build lookup: NO -> first matching product (catalog may repeat a NO on
     # different pages; we take the first occurrence only)
     first_by_no = {}
     for p in products:
         if p['no'] not in first_by_no:
             first_by_no[p['no']] = p
- 
+
     # Filter in the exact order the user asked, one row per number
     filtered = [first_by_no[no] for no in requested_order if no in first_by_no]
- 
+
+    # Track which requested numbers don't exist in the catalog
+    found_nos = [no for no in requested_order if no in first_by_no]
+    missing_nos = [no for no in requested_order if no not in first_by_no]
+
     if not filtered:
-        return False, f"Товары не найдены. Доступные NO: {', '.join(sorted(set(p['no'] for p in products), key=int))}"
- 
+        available = ', '.join(sorted(set(p['no'] for p in products), key=lambda x: int(x)))
+        return False, f"Ни одна из позиций не найдена в каталоге. Доступные номера: {available}", {"found": [], "missing": missing_nos}
+
     print(f"Selected {len(filtered)} products: {[p['no'] for p in filtered]}")
- 
+    if missing_nos:
+        print(f"Missing (not in catalog): {missing_nos}")
+
     # Render PDF pages to images (ONLY the pages that are actually needed —
     # important on low-memory hosting like Render free tier)
     needed_pages = sorted(set(p['page'] for p in filtered))
@@ -297,9 +304,9 @@ def create_filtered_pdf(pdf_path, selected_nos, output_path):
     
     doc.build(story)
     print(f"Output PDF saved: {output_path}")
-    return True, f"Создан PDF с {len(filtered)} позициями"
- 
- 
+    return True, f"Создан PDF с {len(filtered)} позициями", {"found": found_nos, "missing": missing_nos}
+
+
 if __name__ == '__main__':
     if len(sys.argv) < 4:
         print("Usage: python3 catalog_filter.py <pdf_path> <numbers> <output_path>")
@@ -310,12 +317,8 @@ if __name__ == '__main__':
     numbers = sys.argv[2]
     output_path = sys.argv[3]
     
-    success, message = create_filtered_pdf(pdf_path, numbers, output_path)
-    
-    result = {"success": success, "message": message, "output": output_path}
+    success, message, details = create_filtered_pdf(pdf_path, numbers, output_path)
+
+    result = {"success": success, "message": message, "output": output_path, "details": details}
     print(json.dumps(result, ensure_ascii=False))
-    sys.exit(0 if success else 1)
- 
-
-
     sys.exit(0 if success else 1)
