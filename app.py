@@ -55,18 +55,24 @@ def filter_catalog():
                 f.write(pdf_bytes)
 
             logger.info(f"Processing catalog, numbers='{numbers}', size={len(pdf_bytes)} bytes")
-            success, message = create_filtered_pdf(input_path, numbers, output_path)
-            logger.info(f"Result: success={success} message={message}")
+            success, message, details = create_filtered_pdf(input_path, numbers, output_path)
+            logger.info(f"Result: success={success} message={message} details={details}")
 
             if not success:
-                return jsonify({"error": message}), 400
+                resp = jsonify({"error": message, "missing": details.get("missing", [])})
+                resp.headers['X-Missing-Numbers'] = ','.join(details.get("missing", []))
+                return resp, 400
 
-            return send_file(
+            response = send_file(
                 output_path,
                 mimetype='application/pdf',
                 as_attachment=True,
                 download_name='selection.pdf'
             )
+            # Expose which numbers were found / not found so the bot can tell the user
+            response.headers['X-Found-Numbers'] = ','.join(details.get("found", []))
+            response.headers['X-Missing-Numbers'] = ','.join(details.get("missing", []))
+            return response
 
     except Exception as e:
         logger.error(traceback.format_exc())
